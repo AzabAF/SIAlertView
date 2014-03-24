@@ -977,7 +977,7 @@ static SIAlertView *__si_alert_current_view;
         self.textField = [[UITextField alloc] initWithFrame:self.bounds];
         self.textField.delegate = self;
         self.textField.text = @"";
-        self.textField.borderStyle = UITextBorderStyleBezel;
+        self.textField.borderStyle = UITextBorderStyleRoundedRect;
         [self.containerView addSubview:self.textField];
     #if DEBUG_LAYOUT
         self.textField.backgroundColor = [UIColor redColor];
