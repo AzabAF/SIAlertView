@@ -16,7 +16,7 @@ NSString *const SIAlertViewWillDismissNotification = @"SIAlertViewWillDismissNot
 NSString *const SIAlertViewDidDismissNotification = @"SIAlertViewDidDismissNotification";
 
 #define DEBUG_LAYOUT 0
-
+#define TEXTFIELD_HEIGHT 28
 #define MESSAGE_MIN_LINE_COUNT 1
 #define MESSAGE_MAX_LINE_COUNT 25
 #define GAP 10
@@ -49,8 +49,10 @@ static SIAlertView *__si_alert_current_view;
 
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) TTTAttributedLabel *messageLabel;
+@property (nonatomic, strong) UITextField *textField;
 @property (nonatomic, strong) UIView *containerView;
 @property (nonatomic, strong) NSMutableArray *buttons;
+@property (nonatomic, assign) CGFloat keyboardOffset;
 
 @property (nonatomic, assign, getter = isLayoutDirty) BOOL layoutDirty;
 
@@ -78,6 +80,10 @@ static SIAlertView *__si_alert_current_view;
 @interface SIAlertBackgroundWindow ()
 
 @property (nonatomic, assign) SIAlertViewBackgroundStyle style;
+
+@end
+
+@interface SIAlertView() <UITextFieldDelegate>
 
 @end
 
@@ -330,6 +336,13 @@ static SIAlertView *__si_alert_current_view;
                      }];
 }
 
+#pragma mark - Getters
+
+- (NSString *)inputText {
+    return self.textField ? self.textField.text : @"";
+}
+
+
 #pragma mark - Setters
 
 - (void)setTitle:(NSString *)title
@@ -426,6 +439,9 @@ static SIAlertView *__si_alert_current_view;
         if (index < [SIAlertView sharedQueue].count - 1) {
             [self dismissAnimated:YES cleanup:NO]; // dismiss to show next alert view
         }
+        else if(self.textField) {
+                        [self.textField becomeFirstResponder];
+        }
     }];
 }
 
@@ -442,6 +458,12 @@ static SIAlertView *__si_alert_current_view;
         if (self.willDismissHandler) {
             self.willDismissHandler(self);
         }
+        if(self.textField) {
+                       [[NSNotificationCenter defaultCenter] removeObserver:self name:UIKeyboardWillShowNotification object:nil];
+                       [[NSNotificationCenter defaultCenter] removeObserver:self name:UIKeyboardWillHideNotification object:nil];
+                       [self.textField resignFirstResponder];
+                }
+        
         [[NSNotificationCenter defaultCenter] postNotificationName:SIAlertViewWillDismissNotification object:self userInfo:nil];
 #ifdef __IPHONE_7_0
         [self removeParallaxEffect];
@@ -719,9 +741,11 @@ static SIAlertView *__si_alert_current_view;
     NSLog(@"%@, %@", self, NSStringFromSelector(_cmd));
 #endif
     
+    CGFloat availableHeight = self.bounds.size.height - self.keyboardOffset;
     CGFloat height = [self preferredHeight];
     CGFloat left = (self.bounds.size.width - CONTAINER_WIDTH) * 0.5;
-    CGFloat top = (self.bounds.size.height - height) * 0.5;
+    //CGFloat top = (self.bounds.size.height - height) * 0.5;
+    CGFloat top = (availableHeight - height) * 0.5;
     self.containerView.transform = CGAffineTransformIdentity;
     self.containerView.frame = CGRectMake(left, top, CONTAINER_WIDTH, height);
     self.containerView.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:self.containerView.bounds cornerRadius:self.containerView.layer.cornerRadius].CGPath;
@@ -746,6 +770,15 @@ static SIAlertView *__si_alert_current_view;
         self.messageLabel.frame = CGRectMake(CONTENT_PADDING_LEFT, y, self.containerView.bounds.size.width - CONTENT_PADDING_LEFT * 2, height);
         y += height;
     }
+    
+    if(self.textField) {
+        if (y > CONTENT_PADDING_TOP) {
+            y += GAP;
+        }
+        CGFloat height = TEXTFIELD_HEIGHT;
+        self.textField.frame = CGRectMake(CONTENT_PADDING_LEFT, y, self.containerView.bounds.size.width - CONTENT_PADDING_LEFT * 2, height);
+        y += height;
+   }
     if (self.items.count > 0) {
         if (y > CONTENT_PADDING_TOP) {
             y += GAP;
@@ -785,6 +818,12 @@ static SIAlertView *__si_alert_current_view;
         }
         height += [self heightForMessageLabel];
     }
+    if (self.textField) {
+             if (height > CONTENT_PADDING_TOP) {
+                     height += GAP;
+                 }
+                height += TEXTFIELD_HEIGHT;
+            }
     if (self.items.count > 0) {
         if (height > CONTENT_PADDING_TOP) {
             height += GAP;
@@ -840,6 +879,9 @@ static SIAlertView *__si_alert_current_view;
     [self setupContainerView];
     [self updateTitleLabel];
     [self updateMessageLabel];
+    if(self.alertViewStyle == SIAlertViewStyleTextInput) {
+                [self setupTextField];
+            }
     [self setupButtons];
     [self invalidateLayout];
 }
@@ -928,6 +970,30 @@ static SIAlertView *__si_alert_current_view;
     [self invalidateLayout];
 }
 
+
+- (void)setupTextField
+{
+    if(!self.textField) {
+        self.textField = [[UITextField alloc] initWithFrame:self.bounds];
+        self.textField.delegate = self;
+        self.textField.text = @"";
+        self.textField.borderStyle = UITextBorderStyleBezel;
+        [self.containerView addSubview:self.textField];
+    #if DEBUG_LAYOUT
+        self.textField.backgroundColor = [UIColor redColor];
+    #endif
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillShowNotification:) name:UIKeyboardWillShowNotification object:nil];
+               [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHideNotification:) name:UIKeyboardWillHideNotification object:nil];
+    }
+    [self invalidateLayout];
+}
+
+
+
+
+
+
+
 - (void)attributedLabel:(__unused TTTAttributedLabel *)label
    didSelectLinkWithURL:(NSURL *)url
 {
@@ -1008,6 +1074,56 @@ static SIAlertView *__si_alert_current_view;
         completion();
     }
 }
+
+#pragma mark - UITextField delegate
+
+- (BOOL)textFieldShouldReturn:(UITextField *)textField {
+    [textField resignFirstResponder];
+    return YES;
+
+}
+
+
+#pragma mark - Keyboard notification handlers
+
+-(void)keyboardWillShowNotification:(NSNotification *)notification {
+        [self moveAlertForKeyboard:notification up:YES];
+    }
+-(void)keyboardWillHideNotification:(NSNotification *)notification {
+        [self moveAlertForKeyboard:notification up:NO];
+    }
+
+- (void)moveAlertForKeyboard:(NSNotification*)notification up:(BOOL)up {
+        NSDictionary* userInfo = [notification userInfo];
+        NSTimeInterval animationDuration;
+        UIViewAnimationCurve animationCurve;
+        CGRect keyboardEndFrame;
+    
+        [[userInfo objectForKey:UIKeyboardAnimationCurveUserInfoKey] getValue:&animationCurve];
+        [[userInfo objectForKey:UIKeyboardAnimationDurationUserInfoKey] getValue:&animationDuration];
+        [[userInfo objectForKey:UIKeyboardFrameEndUserInfoKey] getValue:&keyboardEndFrame];
+    
+        //calculate new position
+        CGRect containerFrame = self.containerView.frame;
+        CGRect keyboardFrame = [self.containerView convertRect:keyboardEndFrame toView:nil];
+        CGFloat adjustedHeight = self.bounds.size.height;
+        if(up) {
+                adjustedHeight -= keyboardFrame.size.height;
+            }
+        containerFrame.origin.y = (adjustedHeight - containerFrame.size.height) / 2;
+    
+        [UIView beginAnimations:nil context:nil];
+        [UIView setAnimationDuration:animationDuration];
+        [UIView setAnimationCurve:animationCurve];
+        self.containerView.frame = containerFrame;
+        [UIView commitAnimations];
+    
+        // Set keyboardOffset to the width of the keyboard.
+       // This property is used to adjust the alertView y position on willRotate, i.e. before the rotation occurs. Therefore the width is used instead of height.
+    self.keyboardOffset = up ? keyboardFrame.size.width : 0;
+}
+
+
 
 #pragma mark - UIAppearance setters
 
